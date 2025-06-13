@@ -1,27 +1,27 @@
-// server.js (corrected backend code with leaderboard, referral tracking, and admin route) const express = require('express'); const cors = require('cors'); const bodyParser = require('body-parser'); const app = express(); const port = process.env.PORT || 3000;
+const express = require('express'); const bodyParser = require('body-parser'); const cors = require('cors'); const app = express(); const port = process.env.PORT || 3000;
 
 app.use(cors()); app.use(bodyParser.json());
 
-// In-memory database let users = {};
+const SECRET = 'Dangutaga3540#';
 
-const ADMIN_SECRET = 'Dangutaga3540#';
+const users = {};
 
-// Submit Score app.post('/submit-score', (req, res) => { const { userId, username, score, token, referrerId } = req.body; if (token !== ADMIN_SECRET) return res.status(403).send('Invalid token');
+function ensureUser(userId, username) { if (!users[userId]) { users[userId] = { username, totalScore: 0, invites: new Set(), }; } }
 
-if (!users[userId]) { users[userId] = { userId, username, totalScore: 0, referrals: 0 }; // Add referral bonus if (referrerId && users[referrerId]) { users[referrerId].referrals += 1; users[referrerId].totalScore += 5; // referral bonus } }
+app.post('/submit-score', (req, res) => { const { userId, username, score, token, referrerId } = req.body; if (token !== SECRET) return res.status(403).json({ error: 'Invalid token' }); if (!userId || !username || typeof score !== 'number') { return res.status(400).json({ error: 'Missing fields' }); } ensureUser(userId, username); users[userId].username = username; users[userId].totalScore += score;
 
-users[userId].totalScore += score; res.sendStatus(200); });
+// handle referral tracking if (referrerId && referrerId !== userId) { ensureUser(referrerId, 'unknown'); users[referrerId].invites.add(userId); users[referrerId].totalScore += 2; // referral bonus }
 
-// Leaderboard - top 10 players app.get('/leaderboard', (req, res) => { const top = Object.values(users) .sort((a, b) => b.totalScore - a.totalScore) .slice(0, 10); res.json(top); });
+return res.json({ success: true }); });
 
-// My rank and total score app.get('/my-rank', (req, res) => { const { userId } = req.query; if (!userId || !users[userId]) return res.status(404).json({ error: 'User not found' });
+app.get('/leaderboard', (req, res) => { const leaderboard = Object.entries(users) .map(([userId, data]) => ({ userId, username: data.username, score: data.totalScore, })) .sort((a, b) => b.score - a.score) .slice(0, 10); res.json(leaderboard); });
 
-const sorted = Object.values(users).sort((a, b) => b.totalScore - a.totalScore); const rank = sorted.findIndex((u) => u.userId === userId) + 1; res.json({ username: users[userId].username, totalScore: users[userId].totalScore, rank, referrals: users[userId].referrals, }); });
+app.get('/my-rank', (req, res) => { const { userId } = req.query; if (!userId || !users[userId]) { return res.status(404).json({ error: 'User not found' }); } const sorted = Object.entries(users) .map(([id, data]) => ({ userId: id, score: data.totalScore, })) .sort((a, b) => b.score - a.score); const rank = sorted.findIndex(u => u.userId === userId) + 1; res.json({ score: users[userId].totalScore, rank, invites: users[userId].invites.size, }); });
 
-// Admin route to view all users and stats app.get('/admin/all-users', (req, res) => { const { token } = req.query; if (token !== ADMIN_SECRET) return res.status(403).send('Forbidden');
-
-res.json(Object.values(users)); });
+app.get('/admin/all-users', (req, res) => { const { token } = req.query; if (token !== SECRET) return res.status(403).json({ error: 'Forbidden' }); const data = Object.entries(users).map(([id, u]) => ({ userId: id, username: u.username, totalScore: u.totalScore, invites: Array.from(u.invites), })); res.json(data); });
 
 app.listen(port, () => console.log(Server running on port ${port}));
+
+
 
 
