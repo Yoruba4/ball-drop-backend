@@ -1,18 +1,17 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
-
 const app = express();
+require('dotenv').config();
+
 const PORT = process.env.PORT || 3000;
-const MONGO_URI = 'mongodb+srv://your-mongodb-uri'; // Replace with your own MongoDB URI
-const SECRET = 'Dangutaga3540#'; // Same secret as frontend
+const MONGO_URI = "mongodb+srv://nevergive:Olawale4@balldropdb.wfvqcps.mongodb.net/?retryWrites=true&w=majority&appName=BallDropDb";
+const BACKEND_SECRET = 'Dangutaga3540#';
 
 app.use(cors());
 app.use(express.json());
 
-// MongoDB model
-mongoose.connect(MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true });
-
+// MongoDB User Schema
 const userSchema = new mongoose.Schema({
   userId: String,
   username: String,
@@ -21,58 +20,70 @@ const userSchema = new mongoose.Schema({
 
 const User = mongoose.model('User', userSchema);
 
-// Route: Submit Score
+// Connect to MongoDB
+mongoose.connect(MONGO_URI, {
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
+}).then(() => {
+  console.log('Connected to MongoDB');
+}).catch(err => {
+  console.error('MongoDB connection error:', err);
+});
+
+// Submit Score
 app.post('/submit-score', async (req, res) => {
   const { userId, username, score, token } = req.body;
-
-  if (token !== SECRET) {
-    return res.status(403).json({ error: 'Unauthorized' });
+  if (token !== BACKEND_SECRET) {
+    return res.status(403).json({ error: 'Invalid token' });
   }
-
-  if (!userId || typeof score !== 'number') {
-    return res.status(400).json({ error: 'Missing userId or score' });
+  if (!userId || !username || typeof score !== 'number') {
+    return res.status(400).json({ error: 'Invalid input' });
   }
 
   let user = await User.findOne({ userId });
-
-  if (!user) {
-    user = new User({ userId, username, totalScore: score });
-  } else {
+  if (user) {
     user.totalScore += score;
+  } else {
+    user = new User({ userId, username, totalScore: score });
   }
-
   await user.save();
-  res.json({ success: true });
+  res.json({ message: 'Score submitted' });
 });
 
-// Route: Leaderboard
+// Get Global Leaderboard
 app.get('/leaderboard', async (req, res) => {
-  const top = await User.find().sort({ totalScore: -1 }).limit(10);
-  res.json(top.map(user => ({
-    username: user.username,
-    score: user.totalScore
+  const topUsers = await User.find({})
+    .sort({ totalScore: -1 })
+    .limit(10)
+    .select('username totalScore -_id');
+  res.json(topUsers.map(u => ({
+    username: u.username,
+    score: u.totalScore
   })));
 });
 
-// Route: My Rank
+// Get My Rank
 app.get('/my-rank/:userId', async (req, res) => {
-  const user = await User.findOne({ userId: req.params.userId });
+  const { userId } = req.params;
+  const user = await User.findOne({ userId });
   if (!user) return res.status(404).json({ error: 'User not found' });
 
-  const higherRanked = await User.countDocuments({ totalScore: { $gt: user.totalScore } });
+  const higherUsers = await User.countDocuments({ totalScore: { $gt: user.totalScore } });
+
   res.json({
-    rank: higherRanked + 1,
-    score: user.totalScore
+    username: user.username,
+    totalScore: user.totalScore,
+    rank: higherUsers + 1
   });
 });
 
-// Admin Route: View All Users
+// Admin route to view all users
 app.get('/admin/all-users', async (req, res) => {
-  if (req.query.token !== SECRET) {
-    return res.status(403).json({ error: 'Unauthorized' });
-  }
-  const all = await User.find().sort({ totalScore: -1 });
-  res.json(all);
+  const token = req.headers['authorization'];
+  if (token !== BACKEND_SECRET) return res.status(403).json({ error: 'Unauthorized' });
+
+  const users = await User.find({}).sort({ totalScore: -1 });
+  res.json(users);
 });
 
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
