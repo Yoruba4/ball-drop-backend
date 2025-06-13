@@ -1,26 +1,81 @@
-const express = require('express'); const bodyParser = require('body-parser'); const cors = require('cors'); const app = express(); const port = process.env.PORT || 3000;
+const express = require('express');
+const mongoose = require('mongoose');
+const cors = require('cors');
 
-app.use(cors()); app.use(bodyParser.json());
+const app = express();
+const PORT = process.env.PORT || 3000;
+const MONGO_URI = 'mongodb+srv://your-mongodb-uri'; // Replace with your own MongoDB URI
+const SECRET = 'Dangutaga3540#'; // Same secret as frontend
 
-const SECRET = 'Dangutaga3540#';
+app.use(cors());
+app.use(express.json());
 
-const users = {};
+// MongoDB model
+mongoose.connect(MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true });
 
-function ensureUser(userId, username) { if (!users[userId]) { users[userId] = { username, totalScore: 0, invites: new Set(), }; } }
+const userSchema = new mongoose.Schema({
+  userId: String,
+  username: String,
+  totalScore: { type: Number, default: 0 },
+}, { timestamps: true });
 
-app.post('/submit-score', (req, res) => { const { userId, username, score, token, referrerId } = req.body; if (token !== SECRET) return res.status(403).json({ error: 'Invalid token' }); if (!userId || !username || typeof score !== 'number') { return res.status(400).json({ error: 'Missing fields' }); } ensureUser(userId, username); users[userId].username = username; users[userId].totalScore += score;
+const User = mongoose.model('User', userSchema);
 
-// handle referral tracking if (referrerId && referrerId !== userId) { ensureUser(referrerId, 'unknown'); users[referrerId].invites.add(userId); users[referrerId].totalScore += 2; // referral bonus }
+// Route: Submit Score
+app.post('/submit-score', async (req, res) => {
+  const { userId, username, score, token } = req.body;
 
-return res.json({ success: true }); });
+  if (token !== SECRET) {
+    return res.status(403).json({ error: 'Unauthorized' });
+  }
 
-app.get('/leaderboard', (req, res) => { const leaderboard = Object.entries(users) .map(([userId, data]) => ({ userId, username: data.username, score: data.totalScore, })) .sort((a, b) => b.score - a.score) .slice(0, 10); res.json(leaderboard); });
+  if (!userId || typeof score !== 'number') {
+    return res.status(400).json({ error: 'Missing userId or score' });
+  }
 
-app.get('/my-rank', (req, res) => { const { userId } = req.query; if (!userId || !users[userId]) { return res.status(404).json({ error: 'User not found' }); } const sorted = Object.entries(users) .map(([id, data]) => ({ userId: id, score: data.totalScore, })) .sort((a, b) => b.score - a.score); const rank = sorted.findIndex(u => u.userId === userId) + 1; res.json({ score: users[userId].totalScore, rank, invites: users[userId].invites.size, }); });
+  let user = await User.findOne({ userId });
 
-app.get('/admin/all-users', (req, res) => { const { token } = req.query; if (token !== SECRET) return res.status(403).json({ error: 'Forbidden' }); const data = Object.entries(users).map(([id, u]) => ({ userId: id, username: u.username, totalScore: u.totalScore, invites: Array.from(u.invites), })); res.json(data); });
+  if (!user) {
+    user = new User({ userId, username, totalScore: score });
+  } else {
+    user.totalScore += score;
+  }
 
-app.listen(port, () => console.log(Server running on port ${port}));
+  await user.save();
+  res.json({ success: true });
+});
+
+// Route: Leaderboard
+app.get('/leaderboard', async (req, res) => {
+  const top = await User.find().sort({ totalScore: -1 }).limit(10);
+  res.json(top.map(user => ({
+    username: user.username,
+    score: user.totalScore
+  })));
+});
+
+// Route: My Rank
+app.get('/my-rank/:userId', async (req, res) => {
+  const user = await User.findOne({ userId: req.params.userId });
+  if (!user) return res.status(404).json({ error: 'User not found' });
+
+  const higherRanked = await User.countDocuments({ totalScore: { $gt: user.totalScore } });
+  res.json({
+    rank: higherRanked + 1,
+    score: user.totalScore
+  });
+});
+
+// Admin Route: View All Users
+app.get('/admin/all-users', async (req, res) => {
+  if (req.query.token !== SECRET) {
+    return res.status(403).json({ error: 'Unauthorized' });
+  }
+  const all = await User.find().sort({ totalScore: -1 });
+  res.json(all);
+});
+
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 
 
 
